@@ -2,6 +2,7 @@ import json
 import heapq
 import math
 import random
+import time
 from collections import defaultdict
 
 # ============================================================
@@ -248,6 +249,55 @@ RIGHT_OF_T1 = {
     'R': 'D',
 }
 
+def compare_policies_detailed(policy_a, policy_b, label_a, label_b, states, goal_state):
+    matching_states = 0
+    differing_states = []
+
+    for state in states:
+        if state == goal_state:
+            continue
+
+        action_a = policy_a.get(state, "?")
+        action_b = policy_b.get(state, "?")
+
+        if action_a == action_b:
+            matching_states += 1
+        else:
+            differing_states.append((state, action_a, action_b))
+
+    total_states = len(states) - 1  # exclude goal
+    similarity = (matching_states / total_states) * 100 if total_states > 0 else 0.0
+
+    print(f"Comparison: {label_a} vs {label_b}")
+    print(f"Matching states: {matching_states}/{total_states}")
+    print(f"Different states: {len(differing_states)}/{total_states}")
+    print(f"Similarity: {similarity:.2f}%")
+
+    if len(differing_states) == 0:
+        print("Policies are identical.")
+    else:
+        print("Differing states:")
+        for state, action_a, action_b in differing_states:
+            print(f"  State {state}: {label_a}={action_a}, {label_b}={action_b}")
+    print()
+
+
+def print_value_difference_grid(V_a, V_b, title, grid_size, blocks):
+    print(title)
+    print()
+
+    for y in reversed(range(grid_size)):
+        row = []
+        for x in range(grid_size):
+            state = (x, y)
+            if state in blocks:
+                row.append("#####".rjust(8))
+            else:
+                diff = abs(V_a.get(state, 0.0) - V_b.get(state, 0.0))
+                row.append(f"{diff:.2f}".rjust(8))
+        print("".join(row))
+    print()
+
 
 def get_states_t1():
     states = []
@@ -435,6 +485,8 @@ def run_part_21_task1():
 
     compare_policies_t1(P_vi, P_pi)
 
+    return V_vi, P_vi
+
 
 # ============================================================
 # 2.1 TASK 2
@@ -585,52 +637,79 @@ def monte_carlo_control_t23(num_episodes=10000):
 
 
 def print_values_t23(V, title):
-    print(f"\n{title}")
+    print(title)
+    print()
+
     for y in reversed(range(GRID_SIZE_T23)):
         row = []
         for x in range(GRID_SIZE_T23):
             s = (x, y)
+
             if s in BLOCKS_T23:
                 row.append("#####".rjust(8))
             else:
-                row.append(f"{V.get(s, 0):6.2f}".rjust(8))
-        print(" ".join(row))
+                row.append(f"{V.get(s, 0.0):.2f}".rjust(8))
+
+        print("".join(row))
+
+    print()
 
 
 def print_policy_t23(policy, title):
-    print(f"\n{title}")
+    print(title)
+    print()
+
     for y in reversed(range(GRID_SIZE_T23)):
         row = []
         for x in range(GRID_SIZE_T23):
             s = (x, y)
+
             if s in BLOCKS_T23:
                 row.append("#####".rjust(6))
             elif s == GOAL_T23:
-                row.append(" G ".rjust(6))
+                row.append("G".rjust(6))
             else:
                 row.append(policy.get(s, "?").rjust(6))
-        print(" ".join(row))
+
+        print("".join(row))
+
+    print()
 
 
 def run_part_21_task2():
-    print("\n2.1 Task 2:")
-    Q, V, policy = monte_carlo_control_t23(num_episodes=10000)
-    print_values_t23(V, "Task 2 - Monte Carlo: Value Function")
-    print_policy_t23(policy, "Task 2 - Monte Carlo: Policy")
+    print("\n2.1 Task 2:\n")
+
+    Q_mc, V_mc, P_mc = monte_carlo_control_t23(num_episodes=10000)
+
+    print_values_t23(V_mc, "Task 2 - Monte Carlo: Value Function")
+    print_policy_t23(P_mc, "Task 2 - Monte Carlo: Policy")
+
+    return V_mc, P_mc
 
 
 # ============================================================
 # 2.1 TASK 3
 # ============================================================
 
-def q_learning_t23(num_episodes=10000, max_steps=200):
+def q_learning_t23(num_episodes=10000, max_steps=200, optimal_policy=None, window=100):
     Q = defaultdict(float)
 
-    for _ in range(num_episodes):
+    episode_returns = []
+    episode_lengths = []
+    episode_success = []
+    policy_match_episode = None
+
+    start_time = time.perf_counter()
+
+    for episode_index in range(1, num_episodes + 1):
         state = START_T23
+        total_return = 0
+        steps = 0
+        reached_goal = False
 
         for _ in range(max_steps):
             if is_terminal_t23(state):
+                reached_goal = True
                 break
 
             action = epsilon_greedy_action_t23(Q, state)
@@ -646,6 +725,36 @@ def q_learning_t23(num_episodes=10000, max_steps=200):
             )
 
             state = next_state
+            total_return += r
+            steps += 1
+
+            if is_terminal_t23(state):
+                reached_goal = True
+                break
+
+        episode_returns.append(total_return)
+        episode_lengths.append(steps)
+        episode_success.append(1 if reached_goal else 0)
+
+        if optimal_policy is not None and policy_match_episode is None:
+            current_policy = {}
+            for s in ALL_STATES_T23:
+                if is_terminal_t23(s):
+                    continue
+                current_policy[s] = argmax_q_t23(Q, s)
+
+            same = True
+            for s in ALL_STATES_T23:
+                if s == GOAL_T23:
+                    continue
+                if current_policy.get(s, "?") != optimal_policy.get(s, "?"):
+                    same = False
+                    break
+
+            if same:
+                policy_match_episode = episode_index
+
+    end_time = time.perf_counter()
 
     policy = {}
     V = {}
@@ -657,16 +766,96 @@ def q_learning_t23(num_episodes=10000, max_steps=200):
         V[s] = max(Q[(s, a)] for a in ACTIONS_T23)
 
     V[GOAL_T23] = 0.0
-    return Q, V, policy
 
+    stats = {
+        "training_time_seconds": end_time - start_time,
+        "episode_returns": episode_returns,
+        "episode_lengths": episode_lengths,
+        "episode_success": episode_success,
+        "policy_match_episode": policy_match_episode,
+        "window": window,
+    }
 
-def run_part_21_task3():
-    print("\n2.1 Task 3:")
-    Q, V, policy = q_learning_t23(num_episodes=10000)
-    print_values_t23(V, "Task 3 - Q-Learning: Value Function")
-    print_policy_t23(policy, "Task 3 - Q-Learning: Policy")
+    return Q, V, policy, stats
 
+def run_part_21_task3(optimal_policy):
+    print("\n2.1 Task 3:\n")
 
+    Q, V_ql, P_ql, stats = q_learning_t23(
+        num_episodes=10000,
+        optimal_policy=optimal_policy,
+        window=100
+    )
+
+    print_values_t23(V_ql, "Task 3 - Q-Learning: Value Function")
+    print_policy_t23(P_ql, "Task 3 - Q-Learning: Policy")
+
+    print_learning_statistics(
+        stats,
+        "Q-Learning Convergence / Efficiency Statistics:"
+    )
+
+    return V_ql, P_ql
+
+def print_learning_statistics(stats, title):
+    print(title)
+
+    returns = stats["episode_returns"]
+    lengths = stats["episode_lengths"]
+    success = stats["episode_success"]
+    window = stats["window"]
+
+    last_returns = returns[-window:] if len(returns) >= window else returns
+    last_lengths = lengths[-window:] if len(lengths) >= window else lengths
+    last_success = success[-window:] if len(success) >= window else success
+
+    avg_return = sum(last_returns) / len(last_returns) if last_returns else 0.0
+    avg_length = sum(last_lengths) / len(last_lengths) if last_lengths else 0.0
+    success_rate = (sum(last_success) / len(last_success) * 100) if last_success else 0.0
+
+    print(f"Training time: {stats['training_time_seconds']:.4f} seconds")
+    print(f"Average return over last {len(last_returns)} episodes: {avg_return:.2f}")
+    print(f"Average episode length over last {len(last_lengths)} episodes: {avg_length:.2f}")
+    print(f"Success rate over last {len(last_success)} episodes: {success_rate:.2f}%")
+
+    if stats["policy_match_episode"] is None:
+        print("First full match with optimal Task 1 policy: Not reached")
+    else:
+        print(f"First full match with optimal Task 1 policy: Episode {stats['policy_match_episode']}")
+    print()
+
+def run_part_21_comparisons(P_opt, P_mc, P_ql):
+    print("\n2.1 Policy Comparisons:\n")
+
+    print("Task 2 vs Task 1 Optimal Policy:")
+    compare_policies_detailed(
+        P_mc,
+        P_opt,
+        "Monte Carlo",
+        "Task 1 Optimal",
+        ALL_STATES_T23,
+        GOAL_T23
+    )
+
+    print("Task 3 vs Task 2:")
+    compare_policies_detailed(
+        P_ql,
+        P_mc,
+        "Q-Learning",
+        "Monte Carlo",
+        ALL_STATES_T23,
+        GOAL_T23
+    )
+
+    print("Task 3 vs Task 1 Optimal Policy:")
+    compare_policies_detailed(
+        P_ql,
+        P_opt,
+        "Q-Learning",
+        "Task 1 Optimal",
+        ALL_STATES_T23,
+        GOAL_T23
+    )
 # ============================================================
 # MAIN
 # ============================================================
@@ -675,9 +864,18 @@ def main():
     random.seed(42)
 
     run_part_11()
-    run_part_21_task1()
-    run_part_21_task2()
-    run_part_21_task3()
+
+    # Task 1
+    V_opt, P_opt = run_part_21_task1()
+
+    # Task 2
+    V_mc, P_mc = run_part_21_task2()
+
+    # Task 3
+    V_ql, P_ql = run_part_21_task3(P_opt)
+
+    # Comparisons
+    run_part_21_comparisons(P_opt, P_mc, P_ql)
 
 
 if __name__ == "__main__":
