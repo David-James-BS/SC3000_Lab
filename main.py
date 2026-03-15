@@ -41,11 +41,7 @@ def uniform_cost_search_relaxed(G, Dist, start, goal):
     visited = set()
 
     while frontier:
-        frontier.sort()
-        total_distance, current_node, path = frontier.pop(0)
-
-        if current_node in visited:
-            continue
+        total_distance, current_node, path = heapq.heappop(frontier)
 
         visited.add(current_node)
 
@@ -55,9 +51,7 @@ def uniform_cost_search_relaxed(G, Dist, start, goal):
         for neighbor in G[current_node]:
             if neighbor not in visited:
                 edge_key = f"{current_node},{neighbor}"
-                frontier.append(
-                    (total_distance + Dist[edge_key], neighbor, path + [neighbor])
-                )
+                heapq.heappush(frontier, (total_distance + Dist[edge_key], neighbor, path + [neighbor]))
 
     return None, float("inf")
 
@@ -76,18 +70,15 @@ def compute_total_energy(path, Cost):
 # ----------------------------
 def ucs_with_energy_budget(G, Dist, Cost, start, goal, budget):
     frontier = [(0, 0, start, [start])]
-    visited = {}
+    best_dist = {(start, 0): 0}
+    best_at_node = {start: [(0, 0)]}
 
     while frontier:
-        frontier.sort()
-        total_distance, total_energy, current_node, path = frontier.pop(0)
+        total_distance, total_energy, current_node, path = heapq.heappop(frontier)
 
-        if current_node in visited:
-            prev_dist, prev_energy = visited[current_node]
-            if total_distance >= prev_dist and total_energy >= prev_energy:
-                continue
-
-        visited[current_node] = (total_distance, total_energy)
+        state = (current_node, total_energy)
+        if total_distance > best_dist.get(state, float("inf")):
+            continue
 
         if current_node == goal:
             return path, total_distance, total_energy
@@ -98,10 +89,28 @@ def ucs_with_energy_budget(G, Dist, Cost, start, goal, budget):
             new_distance = total_distance + Dist[edge_key]
             new_energy = total_energy + Cost[edge_key]
 
-            if new_energy <= budget:
-                frontier.append(
-                    (new_distance, new_energy, neighbor, path + [neighbor])
-                )
+            if new_energy > budget:
+                continue
+
+            dominated = False
+            for old_energy, old_distance in best_at_node.get(neighbor, []):
+                if old_energy <= new_energy and old_distance <= new_distance:
+                    dominated = True
+                    break
+            if dominated:
+                continue
+
+            filtered = []
+            for old_energy, old_distance in best_at_node.get(neighbor, []):
+                if not (new_energy <= old_energy and new_distance <= old_distance):
+                    filtered.append((old_energy, old_distance))
+            filtered.append((new_energy, new_distance))
+            best_at_node[neighbor] = filtered
+
+            next_state = (neighbor, new_energy)
+            if new_distance < best_dist.get(next_state, float("inf")):
+                best_dist[next_state] = new_distance
+                heapq.heappush(frontier, (new_distance, new_energy, neighbor, path + [neighbor]))
 
     return None, float("inf"), float("inf")
 
